@@ -42,6 +42,11 @@ Add IP Address and port of your MQTT Broker and desired update interval in secon
 
 Hardware used is an ESP8266 on a Wemos D1 clone and 128x64 Adafruit SSD1306 SPI OLED Display.
 
+BY THE WAY: there's a small issue.... when starting up, the program waits for a WiFi connection before proceeding. This happens before the Display is initiated.
+This leads to the situation that the display remains dark without a WiFi connection which could easily misinterpreted as a defect of the unit. 
+I will fix that some day.
+
+
 ![image](https://github.com/dougie996/M1N1MaraX_MQTT/assets/117717919/8c066df9-6e21-4d42-b458-7699bd4b0714)
 
 
