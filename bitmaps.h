@@ -1,3 +1,4 @@
+#include <avr/pgmspace.h>
 //Bitmap Data
 // 'steam30', 30x30px
 const unsigned char steam30 [] PROGMEM = {
