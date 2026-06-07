@@ -1,53 +1,69 @@
-This is a quick and dirty implementation of a Display and MQTT Client for Lelit MaraX V2 Espresso Machines.
+This is a compact display and MQTT client for Lelit MaraX V1/V2 espresso machines.
+It runs on an ESP8266/Wemos D1 mini with a 128x64 SSD1306 OLED display.
 
-What it does: 
+The firmware supports both MaraX V1 and V2:
 
-1) In idle mode:
-In the upper left corner is the Heater Status. While heating, a blinking cursor and Text "Heatup" is shown.
-In the upper center a WiFi Icon is shown, together with the WiFi Signal Strength, when connected to WiFi.
-In the upper right the Mara X Mode of operation is shown. A Coffeecup signals Coffee Priority Mode; a Steam Symbol Steam Priority Mode.
-Lower part left & right: reported Temperature of Heat Exchanger and Steam Boiler.
+- MaraX V2 reports the pump state through the serial data frame.
+- MaraX V1 does not provide a serial pump state, so the firmware can read a reed contact and debounces short off glitches before stopping the shot timer.
 
-2) In operation mode:
-As soon the coffee brewing sequence is started, der Steam Temperature display is replaced by a shot timer, counting seconds up and a filling up Coffeecup is shown on the left, together with the Heat Exchanger Temperature.
-After brewing sequence has ended, the Display returns to idle Mode. 
+The active build currently has `MARA_V1` enabled in `M1N1MaraX_MQTT.cpp`. For a V2 machine, disable that define so the serial pump state is used directly.
 
-3) The following parameters are published via WiFi to a connected MQTT Server
+## What It Does
 
-      1. Mara Software Version and Mode of Operation
-      2. Steam Temp
-      3. Target Steam Temp
-      4. Heat Exchange Temp
-      5. Heating Boost Mode
-      6. Heating Element on/off
-      7. Pump on/off
-      8. WiFiRxLevel
+In idle mode the display shows:
 
-4. Configuration can primarily be done via the secrets.h file.
-   It contains Parameters like WiFi SSID and Password and MQTT Server Address & Port. You can also define the MQTT Update Interval in seconds.
-   You need to match this based on your requirements.
+1. Heater status in the upper left corner.
+2. WiFi icon when connected.
+3. MaraX operating mode in the upper right corner.
+4. Heat exchanger and steam boiler temperatures.
 
-   
+During brewing, the steam temperature area is replaced by a shot timer. A filling coffee cup animation is shown together with the heat exchanger temperature.
 
-Despite many other similar projects, this one is using the correct Mara X V2 wiring and coding!
-Please TAKE CARE, as most information in the Web regarding how to interface with Mara X Gicar Control Box is WRONG! 
+The following values are published to MQTT:
 
-Please also visit https://www.m1n1.de/en/lelit-mara-x-v2-gicar-internals/ for details.
+1. Firmware version.
+2. Operating mode.
+3. Steam temperature.
+4. Target steam temperature.
+5. Heat exchanger temperature.
+6. Boost countdown.
+7. Heating element state.
+8. Pump state.
+9. WiFi signal level.
 
-The Arduino Tx Line / Gicar Rx Line dones not need to be connected. There's no program code inside the Gicar, which would work with data recieved via the serial interface. 
-The Memory of the Gicar Processor is quite full. 50% are already occupied by a huge Table with 921 Values for the Temp Sensor evaluation plus the STM8 Compiler Runtime. 
+## Configuration
 
-You need to add your WLAN SSID and Password to the secrets.h file, for getting acces to your WLAN. The Machine will appear in your router as "MaraX".
-Add IP Address and port of your MQTT Broker and desired update interval in seconds.  
+Local configuration is done with `secrets.h`.
+To create it, copy `secrets.example.h` to `secrets.h` and adjust the values:
 
-Hardware used is an ESP8266 on a Wemos D1 clone and 128x64 Adafruit SSD1306 SPI OLED Display.
+```cpp
+#define WLAN_SSID "your-wifi-ssid"
+#define WLAN_PASS "your-wifi-password"
+#define MQTT_SERVER "192.168.1.100"
+#define MQTT_PORT 1883
+#define MQTT_UPDATE_INTERVAL 30
+#define MQTT_USER "marax"
+#define MQTT_PASSWORD "your-mqtt-password"
+```
 
-BY THE WAY: there's a small issue.... when starting up, the program waits for a WiFi connection before proceeding. This happens before the Display is initiated.
-This leads to the situation that the display remains dark without a WiFi connection which could easily misinterpreted as a defect of the unit. 
-I will fix that some day.
+The machine appears in the router as `MaraX`.
 
+## V1 And V2 Notes
+
+For MaraX V1, keep `MARA_V1` enabled. The firmware reads the reed contact on `PUMP_PIN` and stabilizes the pump state with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
+
+For MaraX V2, disable `MARA_V1`. The firmware will then use the pump state that comes from the serial interface.
+
+The Arduino TX line / Gicar RX line does not need to be connected. The firmware only needs to receive data from the machine.
+
+## Hardware
+
+- ESP8266 / Wemos D1 mini or compatible board.
+- 128x64 SSD1306 OLED display.
+- MaraX serial connection.
+- For MaraX V1: reed contact on `D7`/GPIO13 for pump detection.
+
+Please take care when wiring the MaraX Gicar control box. There is conflicting information online about the interface, especially for V2 machines. Please see for proper wiring and instructions:
+https://www.m1n1.de/en/lelit-mara-x-v2-gicar-internals/
 
 ![image](https://github.com/dougie996/M1N1MaraX_MQTT/assets/117717919/8c066df9-6e21-4d42-b458-7699bd4b0714)
-
-
-![MaraX_MQTT_final](https://github.com/dougie996/M1N1MaraX_MQTT/assets/117717919/41279506-7fa4-4b17-8ba5-9439497c996f)
