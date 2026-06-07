@@ -1,7 +1,8 @@
-This is a compact display and MQTT client for Lelit MaraX V1/V2 espresso machines.
+This is an external ESP8266-based shot timer and monitor for Lelit MaraX V1/V2 espresso machines.
+
 It runs on an ESP8266/Wemos D1 mini with a 128x64 SSD1306 OLED display.
 
-The firmware supports both MaraX V1 and V2:
+The shot timer supports both MaraX V1 and V2:
 
 - MaraX V2 reports the pump state through the serial data frame.
 - MaraX V1 does not provide a serial pump state, so the firmware can read a reed contact and debounces short off glitches before stopping the shot timer.
@@ -21,7 +22,7 @@ During brewing, the steam temperature area is replaced by a shot timer. A fillin
 
 The following values are published to MQTT:
 
-1. Firmware version.
+1. MaraX firmware version reported by the serial interface.
 2. Operating mode.
 3. Steam temperature.
 4. Target steam temperature.
@@ -50,11 +51,11 @@ The machine appears in the router as `MaraX`.
 
 ## V1 And V2 Notes
 
-For MaraX V1, keep `MARA_V1` enabled. The firmware reads the reed contact on `PUMP_PIN` and stabilizes the pump state with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
+For MaraX V1, keep `MARA_V1` enabled. The shot timer reads the reed contact on `PUMP_PIN` and stabilizes the pump state with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
 
 For MaraX V2, disable `MARA_V1`. The firmware will then use the pump state that comes from the serial interface.
 
-The Arduino TX line / Gicar RX line does not need to be connected. The firmware only needs to receive data from the machine.
+The Arduino TX line / Gicar RX line does not need to be connected. The shot timer only needs to receive data from the machine.
 
 ## Hardware
 

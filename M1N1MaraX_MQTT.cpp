@@ -9,9 +9,12 @@ This file is based on M1N1MaraX_MQTT by Ralf Grafe:
 M1N1MaraX_MQTT is partly based on MaraX-Shot-Monitor:
 <https://github.com/Anlieger/MaraX-Shot-Monitor>
 
-This version adds PlatformIO support, MaraX V1 pump detection,
-safer serial parsing, non-blocking MQTT reconnect handling, and
-local-only secrets configuration.
+This firmware runs on an external ESP8266 shot timer/monitor. It reads data
+from the MaraX Gicar control box.
+
+This version adds PlatformIO support, MaraX V1 pump detection, safer serial
+parsing, non-blocking MQTT reconnect handling, and local-only secrets
+configuration.
 
 M1N1MaraX_MQTT is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -75,6 +78,7 @@ bool reedOpenSensor = false;
 
 #define INVERSE_LOGIC 1 // Use inverse logic for MaraX
 
+// Show simulated values if Mara is off
 #define SIMULATE_MARA_RX false
 
 const unsigned long SERIAL_TIMEOUT_MS = 1000;
