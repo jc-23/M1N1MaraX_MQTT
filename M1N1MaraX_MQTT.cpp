@@ -83,6 +83,7 @@ bool reedOpenSensor = false;
 
 const unsigned long SERIAL_TIMEOUT_MS = 1000;
 const unsigned long MQTT_RECONNECT_INTERVAL_MS = 5000;
+const unsigned long STATUS_DISPLAY_INTERVAL_MS = 1000;
 const unsigned long HEAT_BLINK_INTERVAL_MS = 1000;
 const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 3;
 const int SHOT_TIMER_MAX_SECONDS = 99;
@@ -165,6 +166,7 @@ struct MaraData {
 
 unsigned long lastMsg = 0;
 unsigned long lastMqttReconnectAttempt = 0;
+unsigned long lastStatusDisplayMillis = 0;
 
 // Draw a temperature and keep two- and three-digit values visually centered.
 void drawTemperature(int value, int xForTwoDigits, int xForThreeDigits, int y) {
@@ -231,12 +233,15 @@ void wifiSetup() {
 }
 
 // Parse a complete line from the MaraX serial interface.
-// Expected frame:
-//   C1.23,045,124,093,0840,1,0
-//   mode+firmware, steam, target steam, HX, boost countdown, heat, pump
+// Expected frames:
+//   V1: C1.23,045,124,093,0840,1
+//   V2: C1.23,045,124,093,0840,1,0
+//   mode+firmware, steam, target steam, HX, boost countdown, heat, [pump]
 //
-// The parser only accepts exactly seven fields. This keeps malformed serial
-// data from shifting values into the wrong MQTT topic or display position.
+// V2 sends seven fields including pump state. V1 has no serial pump state, so
+// six fields are enough; the loop later overwrites pumpState from the reed
+// contact. Strict field counts keep malformed serial data from shifting values
+// into the wrong MQTT topic or display position.
 bool parseMaraFrame(char *frame, MaraData &receivedData) {
   char *fields[7];
   int fieldCount = 0;
@@ -250,7 +255,13 @@ bool parseMaraFrame(char *frame, MaraData &receivedData) {
     ptr = strtok(NULL, ",");
   }
 
-  if (fieldCount != 7 || strlen(fields[0]) < 2) {
+#ifdef MARA_V1
+  const int minFieldCount = 6;
+#else
+  const int minFieldCount = 7;
+#endif
+
+  if (fieldCount < minFieldCount || fieldCount > 7 || strlen(fields[0]) < 2) {
     return false;
   }
 
@@ -264,7 +275,7 @@ bool parseMaraFrame(char *frame, MaraData &receivedData) {
   receivedData.hxTemp = atoi(fields[3]);
   receivedData.boostCountdown = atoi(fields[4]);
   receivedData.heatState = atoi(fields[5]);
-  receivedData.pumpState = atoi(fields[6]);
+  receivedData.pumpState = fieldCount == 7 ? atoi(fields[6]) : 0;
 
   return true;
 }
@@ -289,8 +300,9 @@ MaraData getSimulatedMaraData() {
 // the machine as off so the display can switch to the OFF screen.
 MaraData getMaraData() {
   /*
-    Example Data: C1.23,045,124,093,0840,1,0\n every ~400-500ms
-    Length: 27
+    Example V1 Data: C1.23,045,124,093,0840,1\n
+    Example V2 Data: C1.23,045,124,093,0840,1,0\n
+    every ~400-500ms
     [Pos] [Data] [Describtion]
     0)      C     Coffee Mode (C) or SteamMode (V) // "+" in case of Mara X V2 Steam Mode
     -       1.23  Software Version
@@ -299,7 +311,7 @@ MaraData getMaraData() {
     3)      093   current hx temperature (Celsius)
     4)      0840  countdown for 'boost-mode'
     5)      1     heating element on or off
-    6)      0     pump on or off // only for Mara X V2 
+    6)      0     pump on or off // only for Mara X V2
   */
   MaraData receivedData;
   // Serial.print("Serial data available: ");
@@ -359,15 +371,37 @@ void showMessage(const char *message) {
   display.display();
 }
 
-void showMessageMaraOff() {
+void showSystemStatus(const char *dataStatus) {
   display.clearDisplay();
-  display.setCursor(35, 2);
-  display.setTextSize(2);
-  display.print("MaraX");
-  display.setCursor(30, 28);
-  display.setTextSize(4);
-  display.print("OFF");
+  display.setTextColor(WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("MaraX ShotTimer");
+
+  display.setCursor(0, 18);
+  display.print("WiFi ");
+  display.print(WiFi.status() == WL_CONNECTED ? "OK" : "WAIT");
+
+  display.setCursor(0, 32);
+  display.print("MQTT ");
+  display.print(mqttClient.connected() ? "OK" : "WAIT");
+
+  display.setCursor(0, 46);
+  display.print("Data ");
+  display.print(dataStatus);
+
   display.display();
+}
+
+void updateSystemStatus(const char *dataStatus) {
+  unsigned long now = millis();
+  if (lastStatusDisplayMillis != 0 && now - lastStatusDisplayMillis < STATUS_DISPLAY_INTERVAL_MS) {
+    return;
+  }
+
+  lastStatusDisplayMillis = now;
+  showSystemStatus(dataStatus);
 }
 
 // Try one MQTT reconnect attempt every MQTT_RECONNECT_INTERVAL_MS. A blocking
@@ -587,7 +621,7 @@ void setup() {
   mqttClient.setServer(mqttServer, mqttPort);
 
   Serial.println("Setup done");
-  showMessage("Ready!");
+  showSystemStatus("WAIT");
 
   delay(100);
 }
@@ -595,6 +629,8 @@ void setup() {
 void loop() {
   if (mqttClient.connected()) {
     mqttClient.loop();
+  } else {
+    connectMQTT();
   }
 
   // Get data
@@ -615,9 +651,8 @@ void loop() {
     publishMQTT(data);
 
   } else if (maraIsOff) {
-    Serial.println("Mara is off");
-    showMessageMaraOff();
-    delay(1000);
+    updateSystemStatus("OFF");
+  } else {
+    updateSystemStatus("WAIT");
   }
-
 }
