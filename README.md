@@ -11,6 +11,13 @@ The active build currently has `MARA_V1` enabled in `M1N1MaraX_MQTT.cpp`. For a 
 
 ## What It Does
 
+During startup or while waiting for valid MaraX data, the display shows a compact status screen:
+
+1. `WiFi OK` / `WiFi WAIT`
+2. `MQTT OK` / `MQTT WAIT`
+3. `Data WAIT` while no valid serial frame has been received.
+4. `Data OFF` when no serial data is received for the configured timeout.
+
 In idle mode the display shows:
 
 1. Heater status in the upper left corner.
@@ -51,9 +58,9 @@ The machine appears in the router as `MaraX`.
 
 ## V1 And V2 Notes
 
-For MaraX V1, keep `MARA_V1` enabled. The shot timer reads the reed contact on `PUMP_PIN` and stabilizes the pump state with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
+For MaraX V1, keep `MARA_V1` enabled. V1 serial frames do not contain a pump state, so the firmware accepts six-field serial frames and reads the pump state from the reed contact on `PUMP_PIN`. The reed value is stabilized with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
 
-For MaraX V2, disable `MARA_V1`. The firmware will then use the pump state that comes from the serial interface.
+For MaraX V2, disable `MARA_V1`. V2 serial frames contain seven fields including the pump state, so the firmware will use the pump state from the serial interface.
 
 The Arduino TX line / Gicar RX line does not need to be connected. The shot timer only needs to receive data from the machine.
 

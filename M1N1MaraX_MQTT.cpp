@@ -119,6 +119,7 @@ char buffer[BUFFER_SIZE];
 size_t bufferIndex = 0;
 bool serialFrameOverflow = false;
 bool maraIsOff = false;
+bool hasReceivedMaraData = false;
 unsigned long lastHeatBlinkMillis = 0;
 bool heatBlinkOn = false;
 int coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
@@ -633,26 +634,30 @@ void loop() {
     connectMQTT();
   }
 
+#ifdef MARA_V1
+  // Sample the reed contact every loop iteration. The reed signal can be
+  // pulse-like, so reading it only when a serial frame arrives would miss
+  // activity and make the shot timer stop while brewing.
+  int effectivePumpState = stabilizeV1PumpState(readV1PumpState());
+  updateShotTimer(effectivePumpState);
+#endif
+
   // Get data
   MaraData data = getMaraData();
   if (data.updated == true) {
+    hasReceivedMaraData = true;
 #ifdef MARA_V1
-    // V1 has no serial pump state, so override it with the debounced reed
-    // contact. With MARA_V1 disabled, V2 keeps the serial pumpState as-is.
-    int rawPumpState = readV1PumpState();
-    data.pumpState = stabilizeV1PumpState(rawPumpState);
-    Serial.print("Mara V1 reed pump raw/effective: ");
-    Serial.print(rawPumpState);
-    Serial.print("/");
-    Serial.println(data.pumpState);
-#endif
+    // V1 has no serial pump state, so use the loop-sampled reed contact.
+    data.pumpState = effectivePumpState;
+#else
     updateShotTimer(data.pumpState);
+#endif
     updateView(data.hxTemp, data.steamTemp, data.heatState, data.mode);
     publishMQTT(data);
 
   } else if (maraIsOff) {
     updateSystemStatus("OFF");
-  } else {
+  } else if (!hasReceivedMaraData) {
     updateSystemStatus("WAIT");
   }
 }
