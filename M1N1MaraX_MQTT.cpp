@@ -36,6 +36,7 @@ along with M1N1MaraX_MQTT. If not, see <https://www.gnu.org/licenses/>.
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include <SoftwareSerial.h>
@@ -132,6 +133,8 @@ const char *wifiPassword = WLAN_PASS;
 const char *mqttServer = MQTT_SERVER;
 const int mqttPort = MQTT_PORT;
 const unsigned long mqttUpdateInterval = MQTT_UPDATE_INTERVAL * 1000UL;
+const char *otaHostname = OTA_HOSTNAME;
+const char *otaPassword = OTA_PASSWORD;
 
 // Instances
 WiFiClient wifi;
@@ -156,6 +159,7 @@ size_t bufferIndex = 0;
 bool serialFrameOverflow = false;
 bool maraIsOff = false;
 bool hasReceivedMaraData = false;
+bool otaStarted = false;
 unsigned long lastHeatBlinkMillis = 0;
 bool heatBlinkOn = false;
 int coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
@@ -204,6 +208,8 @@ struct MaraData {
 unsigned long lastMsg = 0;
 unsigned long lastMqttReconnectAttempt = 0;
 unsigned long lastStatusDisplayMillis = 0;
+
+void showMessage(const char *message);
 
 // Draw a temperature and keep two- and three-digit values visually centered.
 void drawTemperature(int value, int xForTwoDigits, int xForThreeDigits, int y) {
@@ -267,6 +273,35 @@ void wifiSetup() {
   WiFi.mode(WIFI_STA);
   WiFi.hostname("MaraX");
   WiFi.begin(wifiSSID, wifiPassword);
+}
+
+void otaSetup() {
+  ArduinoOTA.setHostname(otaHostname);
+  ArduinoOTA.setPassword(otaPassword);
+
+  ArduinoOTA.onStart([]() {
+    Serial.println("OTA update started");
+    showMessage("OTA...");
+  });
+
+  ArduinoOTA.onEnd([]() {
+    Serial.println("OTA update finished");
+  });
+
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.print("OTA error ");
+    Serial.println(error);
+  });
+}
+
+void ensureOtaStarted() {
+  if (otaStarted || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  ArduinoOTA.begin();
+  otaStarted = true;
+  Serial.println("OTA ready");
 }
 
 // Parse a complete line from the MaraX serial interface.
@@ -662,6 +697,7 @@ void setup() {
 
   showMessage("WiFi...");
   wifiSetup();
+  otaSetup();
 
   // Set our MQTT broker address and port
   mqttClient.setServer(mqttServer, mqttPort);
@@ -673,6 +709,11 @@ void setup() {
 }
 
 void loop() {
+  ensureOtaStarted();
+  if (otaStarted) {
+    ArduinoOTA.handle();
+  }
+
   if (mqttClient.connected()) {
     mqttClient.loop();
   } else {

@@ -53,9 +53,23 @@ To create it, copy `secrets.example.h` to `secrets.h` and adjust the values:
 #define MQTT_UPDATE_INTERVAL 30
 #define MQTT_USER "marax"
 #define MQTT_PASSWORD "your-mqtt-password"
+#define OTA_HOSTNAME "MaraX"
+#define OTA_PASSWORD "your-ota-password"
 ```
 
 The machine appears in the router as `MaraX`.
+
+## OTA Updates
+
+The first upload has to be done via USB. After that, the firmware can be updated over WiFi with the `d1_mini_ota` PlatformIO environment.
+
+Set `OTA_HOSTNAME` and `OTA_PASSWORD` in `secrets.h`. Use the same password in the `upload_flags` of the `d1_mini_ota` environment in `platformio.ini`.
+
+Example:
+
+```sh
+pio run -e d1_mini_ota -t upload
+```
 
 ## V1 And V2 Notes
 

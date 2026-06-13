@@ -7,3 +7,5 @@
 #define MQTT_UPDATE_INTERVAL 30
 #define MQTT_USER "marax"
 #define MQTT_PASSWORD "your-mqtt-password"
+#define OTA_HOSTNAME "MaraX"
+#define OTA_PASSWORD "your-ota-password"
