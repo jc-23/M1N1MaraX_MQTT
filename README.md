@@ -20,12 +20,12 @@ During startup or while waiting for valid MaraX data, the display shows a compac
 
 In idle mode the display shows:
 
-1. Heater status in the upper left corner.
-2. WiFi icon when connected.
+1. Shot timer uptime in the upper left corner.
+2. Heater status in the top bar while heating.
 3. MaraX operating mode in the upper right corner.
-4. Heat exchanger and steam boiler temperatures.
+4. Heat exchanger and steam boiler temperatures in two centered fields.
 
-During brewing, the steam temperature area is replaced by a shot timer. A filling coffee cup animation is shown together with the heat exchanger temperature.
+During brewing, the steam temperature area is replaced by a shot timer and the vertical field separator is hidden. A filling coffee cup animation is shown together with the heat exchanger temperature.
 After the pump stops, the last shot time remains visible for `SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS` before the display returns to idle mode.
 
 The following values are published to MQTT:

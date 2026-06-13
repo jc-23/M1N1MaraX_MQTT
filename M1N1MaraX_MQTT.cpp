@@ -109,8 +109,8 @@ const unsigned long V1_PUMP_OFF_DEBOUNCE_MS = 700;
 const unsigned long SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS = 4000;
 
 // The shot timer is only shown after this many seconds to avoid flashing for
-// accidental short pump/reed blips.
-const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 3;
+// accidental short pump/reed blips, e.g. when filling the boiler.
+const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 2;
 
 // Keep the display compact if a shot runs unusually long.
 const int SHOT_TIMER_MAX_SECONDS = 99;
@@ -119,6 +119,31 @@ const int SHOT_TIMER_MAX_SECONDS = 99;
 const unsigned long STATUS_DISPLAY_INTERVAL_MS = 1000;
 const unsigned long HEAT_BLINK_INTERVAL_MS = 1000;
 const int COFFEE_CUP_FIRST_FRAME = 8;
+
+// OLED layout dimensions. The main display area is split into two equal fields.
+const int TOP_BAR_HEIGHT = 15;
+const int LEFT_FIELD_X = 0;
+const int RIGHT_FIELD_X = SCREEN_WIDTH / 2;
+const int FIELD_WIDTH = SCREEN_WIDTH / 2;
+const int FIELD_SEPARATOR_X = SCREEN_WIDTH / 2;
+const int MAIN_FIELD_TOP = TOP_BAR_HEIGHT;
+const int FIELD_SEPARATOR_GAP = 4;
+const int LEFT_CONTENT_X = LEFT_FIELD_X;
+const int LEFT_CONTENT_WIDTH = FIELD_WIDTH - FIELD_SEPARATOR_GAP;
+const int RIGHT_CONTENT_X = FIELD_SEPARATOR_X + FIELD_SEPARATOR_GAP + 1;
+const int RIGHT_CONTENT_WIDTH = SCREEN_WIDTH - RIGHT_CONTENT_X;
+const int LEFT_ICON_Y = 16;
+const int RIGHT_ICON_Y = 16;
+const int LEFT_TEMP_Y = 50;
+const int RIGHT_TEMP_Y = LEFT_TEMP_Y;
+const int SHOT_TIMER_X = SCREEN_WIDTH - 61;
+const int SHOT_TIMER_Y = 26;
+const int MODE_ICON_X = 115;
+const int MODE_ICON_Y = -2;
+const int HEAT_ICON_X = 42;
+const int HEAT_ICON_Y = 3;
+const int HEAT_TEXT_X = HEAT_ICON_X + 8;
+const int HEAT_TEXT_Y = 0;
 
 // ---------------------------------------------------------------------------
 // MQTT configuration
@@ -211,9 +236,32 @@ unsigned long lastStatusDisplayMillis = 0;
 
 void showMessage(const char *message);
 
-// Draw a temperature and keep two- and three-digit values visually centered.
-void drawTemperature(int value, int xForTwoDigits, int xForThreeDigits, int y) {
-  display.setCursor(value < 100 ? xForTwoDigits : xForThreeDigits, y);
+int textWidth(const char *text, int textSize) {
+  return strlen(text) * 6 * textSize;
+}
+
+int centeredX(int fieldX, int fieldWidth, int contentWidth) {
+  return fieldX + (fieldWidth - contentWidth) / 2;
+}
+
+void drawCenteredText(const char *text, int fieldX, int fieldWidth, int y, int textSize) {
+  display.setTextSize(textSize);
+  display.setCursor(centeredX(fieldX, fieldWidth, textWidth(text, textSize)), y);
+  display.print(text);
+}
+
+void drawCenteredBitmap(int fieldX, int fieldWidth, int y, const unsigned char *bitmap, int width, int height) {
+  display.drawBitmap(centeredX(fieldX, fieldWidth, width), y, bitmap, width, height, WHITE);
+}
+
+// Draw a temperature centered in one of the two main display fields.
+void drawTemperature(int value, int fieldX, int fieldWidth, int y) {
+  char digits[5];
+  snprintf(digits, sizeof(digits), "%d", value);
+  int unitWidth = textWidth("C", 1) * 2; // degree symbol plus "C"
+  int contentWidth = textWidth(digits, 2) + unitWidth;
+
+  display.setCursor(centeredX(fieldX, fieldWidth, contentWidth), y);
   display.setTextSize(2);
   display.print(value);
   display.setTextSize(1);
@@ -226,32 +274,51 @@ void drawTemperature(int value, int xForTwoDigits, int xForThreeDigits, int y) {
 void drawCoffeeCupFrame(int frame) {
   switch (frame) {
     case 8:
-      display.drawBitmap(17, 14, coffeeCup30_01, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_01, 30, 30);
       break;
     case 7:
-      display.drawBitmap(17, 14, coffeeCup30_02, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_02, 30, 30);
       break;
     case 6:
-      display.drawBitmap(17, 14, coffeeCup30_03, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_03, 30, 30);
       break;
     case 5:
-      display.drawBitmap(17, 14, coffeeCup30_04, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_04, 30, 30);
       break;
     case 4:
-      display.drawBitmap(17, 14, coffeeCup30_05, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_05, 30, 30);
       break;
     case 3:
-      display.drawBitmap(17, 14, coffeeCup30_06, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_06, 30, 30);
       break;
     case 2:
-      display.drawBitmap(17, 14, coffeeCup30_07, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_07, 30, 30);
       break;
     case 1:
-      display.drawBitmap(17, 14, coffeeCup30_08, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_08, 30, 30);
       break;
     default:
-      display.drawBitmap(17, 14, coffeeCup30_00, 30, 30, WHITE);
+      drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_00, 30, 30);
       break;
+  }
+}
+
+void drawUptime() {
+  unsigned long totalMinutes = millis() / 60000UL;
+  char uptime[8];
+  unsigned long hours = totalMinutes / 60;
+  unsigned long minutes = totalMinutes % 60;
+
+  snprintf(uptime, sizeof(uptime), "%lu:%02lu", hours, minutes);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(uptime);
+}
+
+void drawLayoutSeparators(bool showVerticalSeparator) {
+  display.drawLine(0, TOP_BAR_HEIGHT, SCREEN_WIDTH - 1, TOP_BAR_HEIGHT, WHITE);
+  if (showVerticalSeparator) {
+    display.drawLine(FIELD_SEPARATOR_X, MAIN_FIELD_TOP, FIELD_SEPARATOR_X, SCREEN_HEIGHT - 1, WHITE);
   }
 }
 
@@ -550,20 +617,20 @@ void publishMQTT(MaraData data) {
 
 // Render the complete OLED view.
 // - During a shot, show the shot timer and animated cup.
-// - Otherwise, show HX/steam temperatures, heat state, WiFi and machine mode.
+// - Otherwise, show HX/steam temperatures, heat state and machine mode.
 void updateView(int hxTemp, int steamTemp, int heatState, const char *mode) {
 
   display.clearDisplay();
   display.setTextColor(WHITE);
+  drawUptime();
+  drawLayoutSeparators(shotSeconds <= SHOT_TIMER_DISPLAY_AFTER_SECONDS);
 
   if (shotSeconds > SHOT_TIMER_DISPLAY_AFTER_SECONDS) {
-    // draw the timer on the right
-    display.fillRect(60, 9, 63, 55, BLACK);
-    display.setTextSize(5);
-    display.setCursor(68, 20);
     char actual[3];
     snprintf(actual, sizeof(actual), "%02d", shotSeconds);
-    display.print(actual); // Display seconds on screen
+    display.setTextSize(5);
+    display.setCursor(SHOT_TIMER_X, SHOT_TIMER_Y);
+    display.print(actual);
 
     if (coffeeCupFrame >= 1) {
       drawCoffeeCupFrame(coffeeCupFrame);
@@ -574,59 +641,40 @@ void updateView(int hxTemp, int steamTemp, int heatState, const char *mode) {
       }
     }
 
-    drawTemperature(hxTemp, 19, 9, 50);
+    drawTemperature(hxTemp, LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_TEMP_Y);
   } else { //Coffee temperature and bitmap
-    display.drawBitmap(17, 16, coffeeCup30_00, 30, 30, WHITE);
-    drawTemperature(hxTemp, 19, 9, 50);
+    drawCenteredBitmap(LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_ICON_Y, coffeeCup30_00, 30, 30);
+    drawTemperature(hxTemp, LEFT_CONTENT_X, LEFT_CONTENT_WIDTH, LEFT_TEMP_Y);
 
     //Steam temperature and bitmap
-    display.drawBitmap(83, 16, steam30, 30, 30, WHITE);
-    drawTemperature(steamTemp, 88, 78, 50);
-
-    // Draw line
-    display.drawLine(66, 16, 66, 64, WHITE);
+    drawCenteredBitmap(RIGHT_CONTENT_X, RIGHT_CONTENT_WIDTH, RIGHT_ICON_Y, steam30, 30, 30);
+    drawTemperature(steamTemp, RIGHT_CONTENT_X, RIGHT_CONTENT_WIDTH, RIGHT_TEMP_Y);
 
     // Boiler is heating up
     if (heatState == 1) {
-      display.setCursor(13, 0);
       display.setTextSize(1);
-      display.print("Heatup");
+      display.setCursor(HEAT_TEXT_X, HEAT_TEXT_Y);
+      display.print("Heat up");
 
       if ((millis() - lastHeatBlinkMillis) > HEAT_BLINK_INTERVAL_MS) {
         lastHeatBlinkMillis = millis();
         heatBlinkOn = !heatBlinkOn;
       }
       if (heatBlinkOn) {
-        display.fillRect(0, 0, 12, 12, BLACK);
-        display.drawCircle(3, 3, 3, WHITE);
-        display.fillCircle(3, 3, 2, WHITE);
+        display.drawCircle(HEAT_ICON_X, HEAT_ICON_Y, 3, WHITE);
+        display.fillCircle(HEAT_ICON_X, HEAT_ICON_Y, 2, WHITE);
       } else {
-        display.fillRect(0, 0, 12, 12, BLACK);
-        display.drawCircle(3, 3, 3, WHITE);
+        display.drawCircle(HEAT_ICON_X, HEAT_ICON_Y, 3, WHITE);
       }
     } else {
-      display.print(""); // Clear heatup message
-      display.fillCircle(3, 3, 3, BLACK);
-    }
-
-    // WiFi Signal
-    if (wifi.connected()) {
-      display.drawBitmap(60, 0, wifiicon, 12, 12, WHITE); // Draw WiFi icon in upper center
-      display.setCursor(75, 2);
-      display.setTextSize(1);
-      //display.print(signalLevel);
-      //display.print("dB");
-    } else {
-      display.fillRect(60, 0, 12, 12, BLACK); // Clear WiFi icon when not connected
-      display.setCursor(75, 2);
-      display.print("       ");
+      heatBlinkOn = false;
     }
 
     // Draw machine mode
     if (mode[0] == 'C') {                                  // "C" = coffe mode
-      display.drawBitmap(115, 0, coffeeCup12, 12, 12, WHITE); // Draw coffee cup icon in upper right corner
+      display.drawBitmap(MODE_ICON_X, MODE_ICON_Y, coffeeCup12, 12, 12, WHITE); // Draw coffee cup icon in upper right corner
     } else {                                                  // Steam mode
-      display.drawBitmap(115, 0, steam12, 12, 12, WHITE);     // Draw steam icon in upper right corner
+      display.drawBitmap(MODE_ICON_X, MODE_ICON_Y, steam12, 12, 12, WHITE);     // Draw steam icon in upper right corner
     }
   }
 
@@ -684,6 +732,7 @@ void setup() {
     for (;;)
       ; // Don't proceed, loop forever
   }
+  display.setTextWrap(false);
   display.display();
   delay(500);
   display.clearDisplay();
