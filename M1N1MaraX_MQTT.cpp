@@ -56,39 +56,74 @@ along with M1N1MaraX_MQTT. If not, see <https://www.gnu.org/licenses/>.
 //   Comment out MARA_V1. The pump state is then taken from the serial frame.
 #define MARA_V1
 
-#define SCREEN_WIDTH 128 // width in px
-#define SCREEN_HEIGHT 64 // height in px
-#define OLED_RESET -1
-#define SCREEN_ADDRESS 0x3C // or 0x3D - check datasheet or OLED display
-#define BUFFER_SIZE 32
+// ---------------------------------------------------------------------------
+// Pin configuration
+// ---------------------------------------------------------------------------
+// Mara serial receive/transmit pins. TX is configured for SoftwareSerial but
+// the MaraX/Gicar RX line normally does not need to be connected.
+#define D5 (14) // D5/GPIO14: ESP RX, connected to MaraX serial TX
+#define D6 (12) // D6/GPIO12: ESP TX, usually not connected
 
-#define D5 (14) // D5 is Rx pin
-#define D6 (12) // D6 is Tx pin
 #ifdef MARA_V1
-#define D7 (13) // D7 is pump pin
+#define D7 (13) // D7/GPIO13: reed contact input for pump detection
 #define PUMP_PIN D7
-
-// Increase this if the shot timer disappears while brewing.
-// Decrease it if the shot timer stays visible too long after brewing stops.
-const unsigned long V1_PUMP_OFF_DEBOUNCE_MS = 700;
 
 // Set to true if your reed contact reports HIGH while the pump is running.
 bool reedOpenSensor = false;
 #endif
 
-#define INVERSE_LOGIC 1 // Use inverse logic for MaraX
+// MaraX serial data uses inverted logic.
+#define INVERSE_LOGIC 1
 
-// Show simulated values if Mara is off
+// ---------------------------------------------------------------------------
+// Display configuration
+// ---------------------------------------------------------------------------
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define SCREEN_ADDRESS 0x3C // common values are 0x3C or 0x3D
+
+// ---------------------------------------------------------------------------
+// Serial/parser configuration
+// ---------------------------------------------------------------------------
+// Maximum expected serial frame length, including room for the string terminator.
+#define BUFFER_SIZE 32
+
+// Set to true to show fixed example values when no MaraX serial data arrives.
 #define SIMULATE_MARA_RX false
 
+// Mark the MaraX as unavailable if no serial byte arrives for this long.
 const unsigned long SERIAL_TIMEOUT_MS = 1000;
-const unsigned long MQTT_RECONNECT_INTERVAL_MS = 5000;
+
+// ---------------------------------------------------------------------------
+// Timing configuration
+// ---------------------------------------------------------------------------
+#ifdef MARA_V1
+// Increase this if the shot timer disappears while brewing.
+// Decrease it if the shot timer stays visible too long after brewing stops.
+const unsigned long V1_PUMP_OFF_DEBOUNCE_MS = 700;
+#endif
+
+// Keep the last shot time on screen after the pump stops.
+const unsigned long SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS = 4000;
+
+// The shot timer is only shown after this many seconds to avoid flashing for
+// accidental short pump/reed blips.
+const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 3;
+
+// Keep the display compact if a shot runs unusually long.
+const int SHOT_TIMER_MAX_SECONDS = 99;
+
+// OLED status/animation intervals.
 const unsigned long STATUS_DISPLAY_INTERVAL_MS = 1000;
 const unsigned long HEAT_BLINK_INTERVAL_MS = 1000;
-const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 3;
-const int SHOT_TIMER_MAX_SECONDS = 99;
 const int COFFEE_CUP_FIRST_FRAME = 8;
+
+// ---------------------------------------------------------------------------
+// MQTT configuration
+// ---------------------------------------------------------------------------
 const char MQTT_CLIENT_ID[] = "MaraX";
+const unsigned long MQTT_RECONNECT_INTERVAL_MS = 5000;
 
 // Local configuration from secrets.h. Copy secrets.example.h to secrets.h and
 // adjust WiFi/MQTT values; secrets.h is intentionally ignored by Git.
@@ -96,7 +131,7 @@ const char *wifiSSID = WLAN_SSID;
 const char *wifiPassword = WLAN_PASS;
 const char *mqttServer = MQTT_SERVER;
 const int mqttPort = MQTT_PORT;
-const unsigned long mqttUpdateInterval = MQTT_UPDATE_INTERVAL * 1000UL; // MQTT update interval from secrets.h
+const unsigned long mqttUpdateInterval = MQTT_UPDATE_INTERVAL * 1000UL;
 
 // Instances
 WiFiClient wifi;
@@ -109,6 +144,7 @@ SoftwareSerial MaraRxSerial(D5, D6, INVERSE_LOGIC); // Rx, Tx, Inverse_Logic
 char signalLevel[16] = "0";
 
 unsigned long lastShotSecondMillis = 0;
+unsigned long shotTimerStoppedMillis = 0;
 int shotSeconds = 0;
 
 unsigned long pumpOffSinceMillis = 0;
@@ -565,18 +601,21 @@ void updateView(int hxTemp, int steamTemp, int heatState, const char *mode) {
 // Maintain the shot timer state from the effective pump state.
 // V1 passes a debounced reed-contact value here, V2 passes the serial value.
 void updateShotTimer(int pumpState) {
+  unsigned long now = millis();
+
   if (pumpState == 1) {
     if (!shotTimerRunning) {
       shotTimerRunning = true;
       pumpOffSinceMillis = 0;
-      lastShotSecondMillis = millis();
+      shotTimerStoppedMillis = 0;
+      lastShotSecondMillis = now;
       shotSeconds = 0;
       coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
       Serial.println("Pump on");
     }
 
-    if (millis() - lastShotSecondMillis >= 1000) {
-      lastShotSecondMillis = millis();
+    if (now - lastShotSecondMillis >= 1000) {
+      lastShotSecondMillis = now;
       ++shotSeconds;
       if (shotSeconds > SHOT_TIMER_MAX_SECONDS) {
         shotSeconds = 0;
@@ -589,8 +628,14 @@ void updateShotTimer(int pumpState) {
     Serial.println("Pump off");
     shotTimerRunning = false;
     pumpOffSinceMillis = 0;
+    shotTimerStoppedMillis = now;
   }
-  shotSeconds = 0;
+
+  if (shotTimerStoppedMillis != 0 && now - shotTimerStoppedMillis >= SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS) {
+    shotTimerStoppedMillis = 0;
+    shotSeconds = 0;
+    coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
+  }
 }
 
 void setup() {

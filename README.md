@@ -26,6 +26,7 @@ In idle mode the display shows:
 4. Heat exchanger and steam boiler temperatures.
 
 During brewing, the steam temperature area is replaced by a shot timer. A filling coffee cup animation is shown together with the heat exchanger temperature.
+After the pump stops, the last shot time remains visible for `SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS` before the display returns to idle mode.
 
 The following values are published to MQTT:
 
