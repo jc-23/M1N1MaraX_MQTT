@@ -213,6 +213,7 @@ bool serialFrameOverflow = false;
 bool maraIsOff = false;
 bool hasReceivedMaraData = false;
 bool otaStarted = false;
+int lastOtaProgressPercent = -1;
 unsigned long lastHeatBlinkMillis = 0;
 bool heatBlinkOn = false;
 int coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
@@ -263,6 +264,8 @@ unsigned long lastMqttReconnectAttempt = 0;
 unsigned long lastStatusDisplayMillis = 0;
 
 void showMessage(const char *message);
+void showOtaProgress(unsigned int progress, unsigned int total);
+void showOtaRestartMessage();
 
 int textWidth(const char *text, int textSize) {
   return strlen(text) * 6 * textSize;
@@ -376,16 +379,23 @@ void otaSetup() {
 
   ArduinoOTA.onStart([]() {
     Serial.println("OTA update started");
-    showMessage("OTA...");
+    lastOtaProgressPercent = -1;
+    showOtaProgress(0, 100);
+  });
+
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    showOtaProgress(progress, total);
   });
 
   ArduinoOTA.onEnd([]() {
     Serial.println("OTA update finished");
+    showOtaRestartMessage();
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.print("OTA error ");
     Serial.println(error);
+    showMessage("OTA error");
   });
 }
 
@@ -535,6 +545,47 @@ void showMessage(const char *message) {
   display.setTextColor(WHITE);
   display.setCursor(0, 16);
   display.println(message);
+  display.display();
+}
+
+void showOtaProgress(unsigned int progress, unsigned int total) {
+  int percent = total == 0 ? 0 : static_cast<int>((static_cast<uint64_t>(progress) * 100) / total);
+  if (percent == lastOtaProgressPercent) {
+    return;
+  }
+  lastOtaProgressPercent = percent;
+
+  const int barX = 8;
+  const int barY = 44;
+  const int barWidth = SCREEN_WIDTH - 16;
+  const int barHeight = 10;
+  const int fillWidth = (barWidth - 4) * percent / 100;
+
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(8, 8);
+  display.print("OTA update");
+
+  display.setTextSize(2);
+  display.setCursor(8, 22);
+  display.print(percent);
+  display.print("%");
+
+  display.drawRect(barX, barY, barWidth, barHeight, WHITE);
+  display.fillRect(barX + 2, barY + 2, fillWidth, barHeight - 4, WHITE);
+  display.display();
+}
+
+void showOtaRestartMessage() {
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(2);
+  display.setCursor(8, 18);
+  display.println("OTA done");
+  display.setTextSize(1);
+  display.setCursor(8, 42);
+  display.println("Restarting...");
   display.display();
 }
 

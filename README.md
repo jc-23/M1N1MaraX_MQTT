@@ -92,6 +92,7 @@ The machine appears in the router as `MaraX`.
 ## OTA Updates
 
 The first upload has to be done via USB. After that, the firmware can be updated over WiFi with the `d1_mini_ota` PlatformIO environment.
+During an OTA upload, the OLED shows the current percentage and a progress bar.
 
 Set `OTA_HOSTNAME` and `OTA_PASSWORD` in `secrets.h`. Use the same password in the `upload_flags` of the `d1_mini_ota` environment in `platformio.ini`.
 
