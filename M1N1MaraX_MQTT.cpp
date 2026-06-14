@@ -112,6 +112,9 @@ const unsigned long SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS = 4000;
 // accidental short pump/reed blips, e.g. when filling the boiler.
 const int SHOT_TIMER_DISPLAY_AFTER_SECONDS = 2;
 
+// Count a completed pump cycle as a shot once it reaches this duration.
+const int SHOT_COUNT_MIN_SECONDS = 20;
+
 // Keep the display compact if a shot runs unusually long.
 const int SHOT_TIMER_MAX_SECONDS = 99;
 
@@ -148,8 +151,26 @@ const int HEAT_TEXT_Y = 0;
 // ---------------------------------------------------------------------------
 // MQTT configuration
 // ---------------------------------------------------------------------------
-const char MQTT_CLIENT_ID[] = "MaraX";
 const unsigned long MQTT_RECONNECT_INTERVAL_MS = 5000;
+const unsigned long MQTT_DISCOVERY_RETRY_INTERVAL_MS = 10000;
+const unsigned long MQTT_STATE_RETRY_INTERVAL_MS = 5000;
+const size_t MQTT_BUFFER_SIZE = 768;
+
+const char MQTT_DISCOVERY_PREFIX[] = "homeassistant";
+const char MQTT_AVAILABILITY_TOPIC[] = "SmartHome/MaraX/status";
+const char MQTT_FIRMWARE_TOPIC[] = "SmartHome/MaraX/firmware";
+const char MQTT_MODE_TOPIC[] = "SmartHome/MaraX/mode";
+const char MQTT_STEAM_TEMP_TOPIC[] = "SmartHome/MaraX/steamTemp";
+const char MQTT_TARGET_STEAM_TEMP_TOPIC[] = "SmartHome/MaraX/targetSteamTemp";
+const char MQTT_HX_TEMP_TOPIC[] = "SmartHome/MaraX/hxTemp";
+const char MQTT_HEAT_STATE_TOPIC[] = "SmartHome/MaraX/heatState";
+const char MQTT_BOOST_COUNTDOWN_TOPIC[] = "SmartHome/MaraX/boostCountdown";
+const char MQTT_PUMP_STATE_TOPIC[] = "SmartHome/MaraX/pumpState";
+const char MQTT_WIFI_SIGNAL_TOPIC[] = "SmartHome/MaraX/WiFiRxLevel";
+const char MQTT_SHOT_COUNT_TOPIC[] = "SmartHome/MaraX/shotCount";
+
+char mqttClientId[24];
+char mqttDeviceId[24];
 
 // Local configuration from secrets.h. Copy secrets.example.h to secrets.h and
 // adjust WiFi/MQTT values; secrets.h is intentionally ignored by Git.
@@ -174,9 +195,16 @@ char signalLevel[16] = "0";
 unsigned long lastShotSecondMillis = 0;
 unsigned long shotTimerStoppedMillis = 0;
 int shotSeconds = 0;
+// HA interprets this cumulative value as total_increasing and handles a reset
+// after an ESP restart while retaining its long-term statistics.
+unsigned long qualifiedShotCount = 0;
 
 unsigned long pumpOffSinceMillis = 0;
 bool shotTimerRunning = false;
+bool mqttDiscoveryPublished = false;
+unsigned long lastMqttDiscoveryAttemptMillis = 0;
+bool shotCountPublishPending = true;
+unsigned long lastShotCountPublishAttemptMillis = 0;
 
 unsigned long lastSerialRxMillis = 0;
 char buffer[BUFFER_SIZE];
@@ -543,6 +571,140 @@ void updateSystemStatus(const char *dataStatus) {
   showSystemStatus(dataStatus);
 }
 
+struct MqttDiscoveryEntity {
+  const char *component;
+  const char *objectId;
+  const char *name;
+  const char *stateTopic;
+  const char *extraConfig;
+};
+
+bool publishDiscoveryEntity(const MqttDiscoveryEntity &entity) {
+  char topic[128];
+  char payload[768];
+
+  int topicLength = snprintf(topic, sizeof(topic), "%s/%s/%s/%s/config",
+                             MQTT_DISCOVERY_PREFIX, entity.component, mqttDeviceId, entity.objectId);
+  int payloadLength = snprintf(
+      payload, sizeof(payload),
+      "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"state_topic\":\"%s\","
+      "\"availability_topic\":\"%s\",\"payload_available\":\"online\","
+      "\"payload_not_available\":\"offline\",\"device\":{\"identifiers\":[\"%s\"],"
+      "\"name\":\"MaraX Shot Timer\",\"manufacturer\":\"DIY\","
+      "\"model\":\"ESP8266 MaraX Shot Timer\"}%s}",
+      entity.name, mqttDeviceId, entity.objectId, entity.stateTopic,
+      MQTT_AVAILABILITY_TOPIC, mqttDeviceId, entity.extraConfig);
+
+  if (topicLength < 0 || static_cast<size_t>(topicLength) >= sizeof(topic) ||
+      payloadLength < 0 || static_cast<size_t>(payloadLength) >= sizeof(payload)) {
+    Serial.print("MQTT discovery payload too large for ");
+    Serial.println(entity.objectId);
+    return false;
+  }
+
+  return mqttClient.publish(topic, payload, true);
+}
+
+bool publishHomeAssistantDiscovery() {
+  static const MqttDiscoveryEntity entities[] = {
+      {"sensor", "firmware", "Machine firmware", MQTT_FIRMWARE_TOPIC,
+       ",\"icon\":\"mdi:chip\",\"entity_category\":\"diagnostic\""},
+      {"sensor", "mode", "Operating mode", MQTT_MODE_TOPIC,
+       ",\"icon\":\"mdi:coffee-maker\""},
+      {"sensor", "steam_temperature", "Steam temperature", MQTT_STEAM_TEMP_TOPIC,
+       ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\","
+       "\"state_class\":\"measurement\""},
+      {"sensor", "target_steam_temperature", "Target steam temperature",
+       MQTT_TARGET_STEAM_TEMP_TOPIC,
+       ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\","
+       "\"state_class\":\"measurement\""},
+      {"sensor", "heat_exchanger_temperature", "Heat exchanger temperature",
+       MQTT_HX_TEMP_TOPIC,
+       ",\"device_class\":\"temperature\",\"unit_of_measurement\":\"\\u00b0C\","
+       "\"state_class\":\"measurement\""},
+      {"sensor", "boost_countdown", "Boost countdown", MQTT_BOOST_COUNTDOWN_TOPIC,
+       ",\"device_class\":\"duration\",\"unit_of_measurement\":\"s\","
+       "\"state_class\":\"measurement\""},
+      {"binary_sensor", "heating", "Heating element", MQTT_HEAT_STATE_TOPIC,
+       ",\"icon\":\"mdi:radiator\",\"payload_on\":\"1\",\"payload_off\":\"0\""},
+      {"binary_sensor", "pump", "Pump", MQTT_PUMP_STATE_TOPIC,
+       ",\"icon\":\"mdi:pump\",\"payload_on\":\"1\",\"payload_off\":\"0\""},
+      {"sensor", "wifi_signal", "WiFi signal", MQTT_WIFI_SIGNAL_TOPIC,
+       ",\"device_class\":\"signal_strength\",\"unit_of_measurement\":\"dBm\","
+       "\"state_class\":\"measurement\",\"entity_category\":\"diagnostic\""},
+      {"sensor", "shot_count", "Shot count", MQTT_SHOT_COUNT_TOPIC,
+       ",\"icon\":\"mdi:counter\",\"unit_of_measurement\":\"shots\","
+       "\"state_class\":\"total_increasing\""},
+  };
+
+  bool published = true;
+  for (const MqttDiscoveryEntity &entity : entities) {
+    published &= publishDiscoveryEntity(entity);
+  }
+
+  if (published) {
+    Serial.println("Home Assistant MQTT discovery published");
+  } else {
+    Serial.println("Home Assistant MQTT discovery publish failed");
+  }
+  return published;
+}
+
+bool publishShotCount() {
+  if (!mqttClient.connected()) {
+    return false;
+  }
+
+  char shotCount[16];
+  snprintf(shotCount, sizeof(shotCount), "%lu", qualifiedShotCount);
+  bool published = mqttClient.publish(MQTT_SHOT_COUNT_TOPIC, shotCount, true);
+  if (published) {
+    shotCountPublishPending = false;
+  }
+  return published;
+}
+
+void publishPumpState(int pumpState) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+
+  mqttClient.publish(MQTT_PUMP_STATE_TOPIC, pumpState == 1 ? "1" : "0", true);
+}
+
+void ensureShotCountPublished() {
+  if (!shotCountPublishPending || !mqttClient.connected()) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (lastShotCountPublishAttemptMillis != 0 &&
+      now - lastShotCountPublishAttemptMillis < MQTT_STATE_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastShotCountPublishAttemptMillis = now;
+  publishShotCount();
+}
+
+void ensureHomeAssistantDiscovery() {
+  if (!mqttClient.connected() || mqttDiscoveryPublished) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (lastMqttDiscoveryAttemptMillis != 0 &&
+      now - lastMqttDiscoveryAttemptMillis < MQTT_DISCOVERY_RETRY_INTERVAL_MS) {
+    return;
+  }
+
+  lastMqttDiscoveryAttemptMillis = now;
+  mqttDiscoveryPublished = publishHomeAssistantDiscovery();
+  if (mqttDiscoveryPublished) {
+    ensureShotCountPublished();
+  }
+}
+
 // Try one MQTT reconnect attempt every MQTT_RECONNECT_INTERVAL_MS. A blocking
 // reconnect loop would freeze the display and serial parser when Home Assistant
 // or WiFi is temporarily unavailable.
@@ -564,8 +726,13 @@ bool connectMQTT() {
   Serial.print("Connecting to MQTT broker on ");
   Serial.print(mqttServer);
   Serial.print(" ... ");
-  if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD)) {
+  if (mqttClient.connect(mqttClientId, MQTT_USER, MQTT_PASSWORD,
+                         MQTT_AVAILABILITY_TOPIC, 0, true, "offline")) {
     Serial.println("connected");
+    mqttDiscoveryPublished = false;
+    lastMqttDiscoveryAttemptMillis = 0;
+    mqttClient.publish(MQTT_AVAILABILITY_TOPIC, "online", true);
+    ensureHomeAssistantDiscovery();
     return true;
   }
 
@@ -596,15 +763,15 @@ void publishMQTT(MaraData data) {
 
     Serial.println("MQTT sending message now");
     bool published = true;
-    published &= mqttClient.publish("SmartHome/MaraX/firmware", data.firmware);
-    published &= mqttClient.publish("SmartHome/MaraX/mode", data.mode);
-    published &= mqttClient.publish("SmartHome/MaraX/steamTemp", steamTemp);
-    published &= mqttClient.publish("SmartHome/MaraX/targetSteamTemp", targetSteamTemp);
-    published &= mqttClient.publish("SmartHome/MaraX/hxTemp", hxTemp);
-    published &= mqttClient.publish("SmartHome/MaraX/heatState", heatState);
-    published &= mqttClient.publish("SmartHome/MaraX/boostCountdown", boostCountdown);
-    published &= mqttClient.publish("SmartHome/MaraX/pumpState", pumpState);
-    published &= mqttClient.publish("SmartHome/MaraX/WiFiRxLevel", signalLevel);
+    published &= mqttClient.publish(MQTT_FIRMWARE_TOPIC, data.firmware, true);
+    published &= mqttClient.publish(MQTT_MODE_TOPIC, data.mode, true);
+    published &= mqttClient.publish(MQTT_STEAM_TEMP_TOPIC, steamTemp, true);
+    published &= mqttClient.publish(MQTT_TARGET_STEAM_TEMP_TOPIC, targetSteamTemp, true);
+    published &= mqttClient.publish(MQTT_HX_TEMP_TOPIC, hxTemp, true);
+    published &= mqttClient.publish(MQTT_HEAT_STATE_TOPIC, heatState, true);
+    published &= mqttClient.publish(MQTT_BOOST_COUNTDOWN_TOPIC, boostCountdown, true);
+    published &= mqttClient.publish(MQTT_PUMP_STATE_TOPIC, pumpState, true);
+    published &= mqttClient.publish(MQTT_WIFI_SIGNAL_TOPIC, signalLevel, true);
 
     if (published) {
       lastMsg = now;
@@ -626,8 +793,8 @@ void updateView(int hxTemp, int steamTemp, int heatState, const char *mode) {
   drawLayoutSeparators(shotSeconds <= SHOT_TIMER_DISPLAY_AFTER_SECONDS);
 
   if (shotSeconds > SHOT_TIMER_DISPLAY_AFTER_SECONDS) {
-    char actual[3];
-    snprintf(actual, sizeof(actual), "%02d", shotSeconds);
+    char actual[4];
+    snprintf(actual, sizeof(actual), "%02u", static_cast<unsigned int>(static_cast<uint8_t>(shotSeconds)));
     display.setTextSize(5);
     display.setCursor(SHOT_TIMER_X, SHOT_TIMER_Y);
     display.print(actual);
@@ -695,13 +862,13 @@ void updateShotTimer(int pumpState) {
       shotSeconds = 0;
       coffeeCupFrame = COFFEE_CUP_FIRST_FRAME;
       Serial.println("Pump on");
+      publishPumpState(1);
     }
 
     if (now - lastShotSecondMillis >= 1000) {
       lastShotSecondMillis = now;
-      ++shotSeconds;
-      if (shotSeconds > SHOT_TIMER_MAX_SECONDS) {
-        shotSeconds = 0;
+      if (shotSeconds < SHOT_TIMER_MAX_SECONDS) {
+        ++shotSeconds;
       }
     }
     return;
@@ -709,9 +876,19 @@ void updateShotTimer(int pumpState) {
 
   if (shotTimerRunning) {
     Serial.println("Pump off");
+    if (shotSeconds >= SHOT_COUNT_MIN_SECONDS) {
+      ++qualifiedShotCount;
+      shotCountPublishPending = true;
+      lastShotCountPublishAttemptMillis = 0;
+      Serial.print("Qualified shot count: ");
+      Serial.println(qualifiedShotCount);
+      ensureShotCountPublished();
+    }
+
     shotTimerRunning = false;
     pumpOffSinceMillis = 0;
     shotTimerStoppedMillis = now;
+    publishPumpState(0);
   }
 
   if (shotTimerStoppedMillis != 0 && now - shotTimerStoppedMillis >= SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS) {
@@ -725,6 +902,10 @@ void setup() {
   // Setup Serials
   Serial.begin(9600);
   MaraRxSerial.begin(9600);
+
+  snprintf(mqttDeviceId, sizeof(mqttDeviceId), "marax_%06lx",
+           static_cast<unsigned long>(ESP.getChipId()));
+  snprintf(mqttClientId, sizeof(mqttClientId), "%s", mqttDeviceId);
 
   // Setup display
   if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
@@ -750,6 +931,9 @@ void setup() {
 
   // Set our MQTT broker address and port
   mqttClient.setServer(mqttServer, mqttPort);
+  if (!mqttClient.setBufferSize(MQTT_BUFFER_SIZE)) {
+    Serial.println("Failed to allocate MQTT discovery buffer");
+  }
 
   Serial.println("Setup done");
   showSystemStatus("WAIT");
@@ -765,6 +949,8 @@ void loop() {
 
   if (mqttClient.connected()) {
     mqttClient.loop();
+    ensureHomeAssistantDiscovery();
+    ensureShotCountPublished();
   } else {
     connectMQTT();
   }

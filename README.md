@@ -39,6 +39,36 @@ The following values are published to MQTT:
 7. Heating element state.
 8. Pump state.
 9. WiFi signal level.
+10. Cumulative number of shots lasting at least `SHOT_COUNT_MIN_SECONDS`.
+
+## Home Assistant MQTT Discovery
+
+The firmware publishes retained MQTT Discovery configurations under the default
+`homeassistant` discovery prefix. Home Assistant groups all entities under one
+`MaraX Shot Timer` device:
+
+1. Machine firmware.
+2. Operating mode.
+3. Steam temperature.
+4. Target steam temperature.
+5. Heat exchanger temperature.
+6. Boost countdown.
+7. Heating element state.
+8. Pump state.
+9. WiFi signal strength.
+10. Shot count.
+
+The device also publishes an availability state, so Home Assistant marks the
+entities unavailable when the ESP8266 disconnects unexpectedly.
+
+A pump cycle is counted once, when it ends, if it lasted at least
+`SHOT_COUNT_MIN_SECONDS` (20 seconds by default). The retained shot count is
+published as a `total_increasing` sensor, allowing Home Assistant to calculate
+daily, weekly, monthly, or other period totals. Cleaning reminders and reset
+logic should be implemented in Home Assistant.
+
+The counter starts at zero after an ESP8266 restart. Home Assistant treats this
+as a reset of the cumulative sensor and preserves its long-term statistics.
 
 ## Configuration
 
