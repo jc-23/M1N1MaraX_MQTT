@@ -1,0 +1,19 @@
+MaraX Shot Timer
+================
+
+Copyright (C) 2024 Ralf Grafe
+Copyright (C) 2026 JC-23
+
+The PlatformIO firmware is based on M1N1MaraX_MQTT by Ralf Grafe:
+https://github.com/dougie996/M1N1MaraX_MQTT
+
+M1N1MaraX_MQTT is partly based on MaraX-Shot-Monitor:
+https://github.com/Anlieger/MaraX-Shot-Monitor
+
+The Timer/Event library files retain their original copyright and license
+notices. They are licensed under GPL-2.0-or-later and may be distributed as
+part of this GPL-3.0-or-later project under GPL version 3.
+
+MaraX and Lelit are trademarks of their respective owners. This is an
+independent community project and is not affiliated with or endorsed by
+Lelit.

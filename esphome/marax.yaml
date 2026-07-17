@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+substitutions:
+  device_name: marax
+  friendly_name: MaraX
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: MaraX V1 shot timer and monitor
+
+esp8266:
+  board: d1_mini
+
+logger:
+  baud_rate: 0
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "MaraX Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [marax]
+
+i2c:
+  sda: D2
+  scl: D1
+  scan: true
+  frequency: 400kHz
+
+uart:
+  id: marax_uart
+  baud_rate: 9600
+  rx_pin:
+    number: D5
+    inverted: true
+  rx_buffer_size: 128
+
+binary_sensor:
+  - platform: gpio
+    id: reed_contact
+    name: Reed contact
+    internal: true
+    pin:
+      number: D7
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    on_press:
+      - lambda: id(marax_component).set_reed_state(true);
+    on_release:
+      - lambda: id(marax_component).set_reed_state(false);
+
+marax:
+  id: marax_component
+  uart_id: marax_uart
+  firmware:
+    name: Machine firmware
+  mode:
+    name: Operating mode
+  steam_temperature:
+    name: Steam temperature
+  target_steam_temperature:
+    name: Target steam temperature
+  hx_temperature:
+    name: Heat exchanger temperature
+  boost_countdown:
+    name: Boost countdown
+  heating:
+    name: Heating element
+  pump:
+    name: Pump
+  shot_count:
+    name: Shot count
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi signal
+    update_interval: 30s
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_small
+    size: 9
+  - file: "gfonts://Roboto Mono"
+    id: font_temperature
+    size: 15
+  - file: "gfonts://Roboto Mono"
+    id: font_shot
+    size: 42
+
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SSD1306 128x64"
+    address: 0x3C
+    update_interval: 250ms
+    lambda: |-
+      const auto bitmap = [&](int x, int y, const unsigned char *data,
+                              int width, int height) {
+        const int row_bytes = (width + 7) / 8;
+        for (int yy = 0; yy < height; yy++)
+          for (int xx = 0; xx < width; xx++)
+            if (pgm_read_byte(data + yy * row_bytes + xx / 8) &
+                (0x80 >> (xx & 7)))
+              it.draw_pixel_at(x + xx, y + yy);
+      };
+      const auto center_bitmap = [&](int field_x, int field_width, int y,
+                                     const unsigned char *data, int width,
+                                     int height) {
+        bitmap(field_x + (field_width - width) / 2, y, data, width, height);
+      };
+      const auto temperature = [&](int value, int field_x, int field_width) {
+        it.printf(field_x + field_width / 2, 49, id(font_temperature),
+                  TextAlign::TOP_CENTER, "%d°C", value);
+      };
+
+      if (!id(marax_component).has_data()) {
+        it.print(0, 0, id(font_small), "MaraX ShotTimer");
+        it.print(0, 18, id(font_small), "WiFi");
+        it.print(45, 18, id(font_small),
+                 network::is_connected() ? "OK" : "WAIT");
+        it.print(0, 32, id(font_small), "API");
+        it.print(45, 32, id(font_small),
+                 network::is_connected() ? "OK" : "WAIT");
+        it.print(0, 46, id(font_small), "Data OFF");
+        return;
+      }
+
+      const int seconds = id(marax_component).shot_seconds();
+      const uint32_t total_minutes = millis() / 60000UL;
+      it.printf(0, 0, id(font_small), "%u:%02u",
+                static_cast<unsigned int>(total_minutes / 60),
+                static_cast<unsigned int>(total_minutes % 60));
+      it.line(0, 15, 127, 15);
+
+      if (seconds > 2) {
+        static const unsigned char *frames[] = {
+          coffeeCup30_01, coffeeCup30_02, coffeeCup30_03, coffeeCup30_04,
+          coffeeCup30_05, coffeeCup30_06, coffeeCup30_07, coffeeCup30_08
+        };
+        static uint8_t frame = 0;
+        center_bitmap(0, 60, 16, frames[frame++ % 8], 30, 30);
+        temperature(id(marax_component).hx_temperature(), 0, 60);
+        it.printf(127, 19, id(font_shot), TextAlign::TOP_RIGHT, "%02d", seconds);
+        return;
+      }
+
+      it.line(64, 15, 64, 63);
+      center_bitmap(0, 60, 16, coffeeCup30_00, 30, 30);
+      center_bitmap(69, 59, 16, steam30, 30, 30);
+      temperature(id(marax_component).hx_temperature(), 0, 60);
+      temperature(id(marax_component).steam_temperature(), 69, 59);
+
+      if (id(marax_component).heating()) {
+        it.print(50, 0, id(font_small), "Heat up");
+        if ((millis() / 1000) % 2)
+          it.filled_circle(43, 5, 3);
+        else
+          it.circle(43, 5, 3);
+      }
+      bitmap(115, 0,
+             id(marax_component).mode() == 'C' ? coffeeCup12 : steam12,
+             12, 12);

@@ -1,1 +1,9 @@
+.pio
+.esphome
+__pycache__/
+*.py[cod]
 secrets.h
+secrets.yaml
+!secrets.example.h
+!secrets.example.yaml
+.vscode/

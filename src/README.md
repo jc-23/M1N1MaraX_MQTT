@@ -1,0 +1,107 @@
+This is the PlatformIO/MQTT firmware variant of the MaraX Shot Timer. The
+shared parts list, wiring, electrical notes, and V1/V2 hardware differences
+are documented in the repository's [main hardware setup](../README.md#hardware-setup).
+
+The active build currently has `MARA_V1` enabled in `M1N1MaraX_MQTT.cpp`. For a V2 machine, disable that define so the serial pump state is used directly.
+
+## What It Does
+
+During startup or while waiting for valid MaraX data, the display shows a compact status screen:
+
+1. `WiFi OK` / `WiFi WAIT`
+2. `MQTT OK` / `MQTT WAIT`
+3. `Data WAIT` while no valid serial frame has been received.
+4. `Data OFF` when no serial data is received for the configured timeout.
+
+In idle mode the display shows:
+
+1. Shot timer uptime in the upper left corner.
+2. Heater status in the top bar while heating.
+3. MaraX operating mode in the upper right corner.
+4. Heat exchanger and steam boiler temperatures in two centered fields.
+
+During brewing, the steam temperature area is replaced by a shot timer and the vertical field separator is hidden. A filling coffee cup animation is shown together with the heat exchanger temperature.
+After the pump stops, the last shot time remains visible for `SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS` before the display returns to idle mode.
+
+The following values are published to MQTT:
+
+1. MaraX firmware version reported by the serial interface.
+2. Operating mode.
+3. Steam temperature.
+4. Target steam temperature.
+5. Heat exchanger temperature.
+6. Boost countdown.
+7. Heating element state.
+8. Pump state.
+9. WiFi signal level.
+10. Cumulative number of shots lasting at least `SHOT_COUNT_MIN_SECONDS`.
+
+## Home Assistant MQTT Discovery
+
+The firmware publishes retained MQTT Discovery configurations under the default
+`homeassistant` discovery prefix. Home Assistant groups all entities under one
+`MaraX Shot Timer` device:
+
+1. Machine firmware.
+2. Operating mode.
+3. Steam temperature.
+4. Target steam temperature.
+5. Heat exchanger temperature.
+6. Boost countdown.
+7. Heating element state.
+8. Pump state.
+9. WiFi signal strength.
+10. Shot count.
+
+The device also publishes an availability state, so Home Assistant marks the
+entities unavailable when the ESP8266 disconnects unexpectedly.
+
+A pump cycle is counted once, when it ends, if it lasted at least
+`SHOT_COUNT_MIN_SECONDS` (20 seconds by default). The retained shot count is
+published as a `total_increasing` sensor, allowing Home Assistant to calculate
+daily, weekly, monthly, or other period totals. Cleaning reminders and reset
+logic should be implemented in Home Assistant.
+
+The counter starts at zero after an ESP8266 restart. Home Assistant treats this
+as a reset of the cumulative sensor and preserves its long-term statistics.
+
+## Configuration
+
+Local configuration is done with `secrets.h`.
+To create it, copy `secrets.example.h` to `secrets.h` and adjust the values:
+
+```cpp
+#define WLAN_SSID "your-wifi-ssid"
+#define WLAN_PASS "your-wifi-password"
+#define MQTT_SERVER "192.168.1.100"
+#define MQTT_PORT 1883
+#define MQTT_UPDATE_INTERVAL 30
+#define MQTT_USER "marax"
+#define MQTT_PASSWORD "your-mqtt-password"
+#define OTA_HOSTNAME "MaraX"
+#define OTA_PASSWORD "your-ota-password"
+```
+
+The machine appears in the router as `MaraX`.
+
+## OTA Updates
+
+The first upload has to be done via USB. After that, the firmware can be updated over WiFi with the `d1_mini_ota` PlatformIO environment.
+During an OTA upload, the OLED shows the current percentage and a progress bar.
+
+Set `OTA_HOSTNAME` and `OTA_PASSWORD` in `secrets.h`. Pass the same password
+through PlatformIO's `PLATFORMIO_UPLOAD_FLAGS` environment variable so it is
+not committed to the repository.
+
+Example:
+
+```sh
+PLATFORMIO_UPLOAD_FLAGS="--auth=your-ota-password" \
+  pio run -e d1_mini_ota -t upload
+```
+
+## MaraX V1 and V2 configuration
+
+For MaraX V1, keep `MARA_V1` enabled. V1 serial frames do not contain a pump state, so the firmware accepts six-field serial frames and reads the pump state from the reed contact on `PUMP_PIN`. The reed value is stabilized with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
+
+For MaraX V2, disable `MARA_V1`. V2 serial frames contain seven fields including the pump state, so the firmware will use the pump state from the serial interface.

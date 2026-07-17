@@ -1,123 +1,142 @@
-This is an external ESP8266-based shot timer and monitor for Lelit MaraX V1/V2 espresso machines.
+# MaraX Shot Timer
 
-It runs on an ESP8266/Wemos D1 mini with a 128x64 SSD1306 OLED display.
+External ESP8266 shot timer and machine monitor for the Lelit MaraX. The
+repository provides two firmware variants for the same Wemos D1 mini and
+SSD1306 display:
 
-The shot timer supports both MaraX V1 and V2:
+- **ESPHome** — recommended when the machine is connected to Home Assistant.
+  It uses the native ESPHome API and creates all entities automatically.
+- **PlatformIO** — standalone Arduino firmware with MQTT and Home Assistant
+  MQTT Discovery.
 
-- MaraX V2 reports the pump state through the serial data frame.
-- MaraX V1 does not provide a serial pump state, so the firmware can read a reed contact and debounces short off glitches before stopping the shot timer.
+Both variants display the heat-exchanger and steam temperatures, heating
+state, operating mode, shot time, and the animated coffee cup. The active
+hardware configuration targets a MaraX V1 and detects the pump through a reed
+contact.
 
-The active build currently has `MARA_V1` enabled in `M1N1MaraX_MQTT.cpp`. For a V2 machine, disable that define so the serial pump state is used directly.
+## Hardware setup
 
-## What It Does
+### Parts
 
-During startup or while waiting for valid MaraX data, the display shows a compact status screen:
+- Wemos D1 mini or compatible ESP8266 board
+- SSD1306 128x64 I²C OLED, normally at address `0x3C`
+- Connection to the MaraX/Gicar serial transmit signal
+- MaraX V1 only: reed contact for pump detection
+- Suitable wiring and, where required by the controller revision, level
+  adaptation for the serial signal
 
-1. `WiFi OK` / `WiFi WAIT`
-2. `MQTT OK` / `MQTT WAIT`
-3. `Data WAIT` while no valid serial frame has been received.
-4. `Data OFF` when no serial data is received for the configured timeout.
+### Connections
 
-In idle mode the display shows:
+| Function | Wemos pin | ESP8266 GPIO | Connect to |
+| --- | --- | --- | --- |
+| OLED SCL | D1 | GPIO5 | SSD1306 SCL |
+| OLED SDA | D2 | GPIO4 | SSD1306 SDA |
+| MaraX serial RX | D5 | GPIO14 | MaraX/Gicar serial TX |
+| Pump detection (V1) | D7 | GPIO13 | Reed contact to GND |
 
-1. Shot timer uptime in the upper left corner.
-2. Heater status in the top bar while heating.
-3. MaraX operating mode in the upper right corner.
-4. Heat exchanger and steam boiler temperatures in two centered fields.
+Connect the OLED to 3.3 V and GND. The reed input uses the ESP8266's internal
+pull-up resistor and is active when the contact connects D7 to GND. If the
+contact behaves in the opposite direction, its polarity must be adjusted in
+the selected firmware.
 
-During brewing, the steam temperature area is replaced by a shot timer and the vertical field separator is hidden. A filling coffee cup animation is shown together with the heat exchanger temperature.
-After the pump stops, the last shot time remains visible for `SHOT_TIMER_HOLD_AFTER_PUMP_OFF_MS` before the display returns to idle mode.
+The MaraX serial interface sends at 9600 baud with inverted logic. The shot
+timer only receives data from the machine:
 
-The following values are published to MQTT:
+- connect MaraX/Gicar TX to D5, the ESP receive pin;
+- do not connect the ESP TX line to the Gicar RX line;
+- ensure the ESP and serial interface have a common reference/GND;
+- verify the electrical signal level for the exact Gicar revision before
+  connecting it to the ESP8266.
 
-1. MaraX firmware version reported by the serial interface.
-2. Operating mode.
-3. Steam temperature.
-4. Target steam temperature.
-5. Heat exchanger temperature.
-6. Boost countdown.
-7. Heating element state.
-8. Pump state.
-9. WiFi signal level.
-10. Cumulative number of shots lasting at least `SHOT_COUNT_MIN_SECONDS`.
+There is conflicting wiring information for different MaraX controller
+revisions, particularly the V2. The
+[M1N1 MaraX V2 Gicar internals documentation](https://www.m1n1.de/en/lelit-mara-x-v2-gicar-internals/)
+is a useful starting point, but the controller in the individual machine
+should always be verified.
 
-## Home Assistant MQTT Discovery
+![MaraX Gicar connection example](https://github.com/dougie996/M1N1MaraX_MQTT/assets/117717919/8c066df9-6e21-4d42-b458-7699bd4b0714)
 
-The firmware publishes retained MQTT Discovery configurations under the default
-`homeassistant` discovery prefix. Home Assistant groups all entities under one
-`MaraX Shot Timer` device:
+### MaraX V1 and V2
 
-1. Machine firmware.
-2. Operating mode.
-3. Steam temperature.
-4. Target steam temperature.
-5. Heat exchanger temperature.
-6. Boost countdown.
-7. Heating element state.
-8. Pump state.
-9. WiFi signal strength.
-10. Shot count.
+MaraX V1 serial frames do not contain the pump state. The timer therefore
+uses the reed contact on D7 and filters short contact interruptions caused by
+machine vibration.
 
-The device also publishes an availability state, so Home Assistant marks the
-entities unavailable when the ESP8266 disconnects unexpectedly.
+MaraX V2 serial frames contain the pump state, so a reed contact is not
+required when that field is used. The included ESPHome configuration currently
+targets V1. The PlatformIO firmware supports both versions; its V1/V2 software
+selection is described in the
+[PlatformIO firmware README](src/README.md#marax-v1-and-v2-configuration).
 
-A pump cycle is counted once, when it ends, if it lasted at least
-`SHOT_COUNT_MIN_SECONDS` (20 seconds by default). The retained shot count is
-published as a `total_increasing` sensor, allowing Home Assistant to calculate
-daily, weekly, monthly, or other period totals. Cleaning reminders and reset
-logic should be implemented in Home Assistant.
+> **Warning**
+>
+> Work inside an espresso machine involves mains voltage, heat, and pressure.
+> Disconnect the machine from power before opening it. Verify the voltage and
+> signal levels of your particular controller revision before connecting the
+> ESP8266.
 
-The counter starts at zero after an ESP8266 restart. Home Assistant treats this
-as a reset of the cumulative sensor and preserves its long-term statistics.
+## ESPHome installation
 
-## Configuration
+Copy the complete [`esphome`](esphome) directory into the configuration
+directory used by the Home Assistant ESPHome add-on. Add these entries to the
+add-on's `secrets.yaml`:
 
-Local configuration is done with `secrets.h`.
-To create it, copy `secrets.example.h` to `secrets.h` and adjust the values:
-
-```cpp
-#define WLAN_SSID "your-wifi-ssid"
-#define WLAN_PASS "your-wifi-password"
-#define MQTT_SERVER "192.168.1.100"
-#define MQTT_PORT 1883
-#define MQTT_UPDATE_INTERVAL 30
-#define MQTT_USER "marax"
-#define MQTT_PASSWORD "your-mqtt-password"
-#define OTA_HOSTNAME "MaraX"
-#define OTA_PASSWORD "your-ota-password"
+```yaml
+wifi_ssid: "your-wifi-ssid"
+wifi_password: "your-wifi-password"
+ap_password: "choose-an-access-point-password"
 ```
 
-The machine appears in the router as `MaraX`.
+Open `marax.yaml` in the ESPHome dashboard, validate it, and install it. The
+first ESPHome installation normally requires USB; subsequent updates work
+over the air. See the [ESPHome-specific instructions](esphome/README.md) for
+details.
 
-## OTA Updates
+## PlatformIO installation
 
-The first upload has to be done via USB. After that, the firmware can be updated over WiFi with the `d1_mini_ota` PlatformIO environment.
-During an OTA upload, the OLED shows the current percentage and a progress bar.
-
-Set `OTA_HOSTNAME` and `OTA_PASSWORD` in `secrets.h`. Use the same password in the `upload_flags` of the `d1_mini_ota` environment in `platformio.ini`.
-
-Example:
+Copy `src/secrets.example.h` to `src/secrets.h` and enter the local Wi-Fi,
+MQTT, and OTA settings. Build and upload the default environment:
 
 ```sh
-pio run -e d1_mini_ota -t upload
+pio run
+pio run --target upload
 ```
 
-## V1 And V2 Notes
+After the first USB installation, the `d1_mini_ota` environment can be used
+for OTA uploads. Supply its password without storing it in the repository:
 
-For MaraX V1, keep `MARA_V1` enabled. V1 serial frames do not contain a pump state, so the firmware accepts six-field serial frames and reads the pump state from the reed contact on `PUMP_PIN`. The reed value is stabilized with `V1_PUMP_OFF_DEBOUNCE_MS`. If the timer still disappears during a shot, increase that value. If the timer stays visible too long after brewing stops, reduce it.
+```sh
+PLATFORMIO_UPLOAD_FLAGS="--auth=your-ota-password" \
+  pio run -e d1_mini_ota --target upload
+```
 
-For MaraX V2, disable `MARA_V1`. V2 serial frames contain seven fields including the pump state, so the firmware will use the pump state from the serial interface.
+More details and the published MQTT entities are documented in the
+[PlatformIO firmware README](src/README.md).
 
-The Arduino TX line / Gicar RX line does not need to be connected. The shot timer only needs to receive data from the machine.
+## Repository layout
 
-## Hardware
+```text
+.
+├── esphome/
+│   ├── components/marax/   # local ESPHome component and bitmap assets
+│   └── marax.yaml
+├── include/                # PlatformIO headers
+├── lib/                    # PlatformIO libraries
+├── src/                    # PlatformIO firmware
+└── platformio.ini
+```
 
-- ESP8266 / Wemos D1 mini or compatible board.
-- 128x64 SSD1306 OLED display.
-- MaraX serial connection.
-- For MaraX V1: reed contact on `D7`/GPIO13 for pump detection.
+The canonical bitmap data lives inside the ESPHome component. The small
+`src/bitmaps.h` forwarding header lets the PlatformIO firmware reuse the same
+asset without maintaining a duplicate.
 
-Please take care when wiring the MaraX Gicar control box. There is conflicting information online about the interface, especially for V2 machines. Please see for proper wiring and instructions:
-https://www.m1n1.de/en/lelit-mara-x-v2-gicar-internals/
+## Credits and license
 
-![image](https://github.com/dougie996/M1N1MaraX_MQTT/assets/117717919/8c066df9-6e21-4d42-b458-7699bd4b0714)
+This project is based on
+[M1N1MaraX_MQTT](https://github.com/dougie996/M1N1MaraX_MQTT), which is partly
+based on
+[MaraX-Shot-Monitor](https://github.com/Anlieger/MaraX-Shot-Monitor).
+See [NOTICE](NOTICE) for the detailed provenance.
+
+The project is licensed under
+[GNU General Public License v3.0 or later](LICENSE).
