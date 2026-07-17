@@ -20,8 +20,9 @@ electrical notes, and V1/V2 differences.
        └── bitmaps.h
    ```
 
-2. Ensure `secrets.yaml` contains `wifi_ssid`, `wifi_password`, and
-   `ap_password`; `secrets.example.yaml` shows the expected names.
+2. Ensure `secrets.yaml` contains `wifi_ssid`, `wifi_password`,
+   `ap_password`, and a generated `marax__encryption_key`;
+   `secrets.example.yaml` shows the expected names.
 3. Validate and install `marax.yaml` from the ESPHome dashboard. The first
    ESPHome installation should be done over USB. Later updates work OTA.
 4. Add the discovered `MaraX` device to Home Assistant.

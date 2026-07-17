@@ -16,6 +16,8 @@ logger:
   baud_rate: 0
 
 api:
+  encryption:
+    key: !secret marax__encryption_key
 
 ota:
   - platform: esphome
@@ -92,17 +94,6 @@ sensor:
     name: WiFi signal
     update_interval: 30s
 
-font:
-  - file: "gfonts://Roboto Mono"
-    id: font_small
-    size: 9
-  - file: "gfonts://Roboto Mono"
-    id: font_temperature
-    size: 15
-  - file: "gfonts://Roboto Mono"
-    id: font_shot
-    size: 42
-
 display:
   - platform: ssd1306_i2c
     id: oled
@@ -124,28 +115,47 @@ display:
                                      int height) {
         bitmap(field_x + (field_width - width) / 2, y, data, width, height);
       };
+      const auto pixel_text = [&](int x, int y, const char *text, int scale) {
+        while (*text) {
+          const uint8_t *glyph = marax::classic_glyph(*text++);
+          for (int xx = 0; xx < 5; xx++)
+            for (int yy = 0; yy < 8; yy++)
+              if (glyph[xx] & (1 << yy))
+                for (int sx = 0; sx < scale; sx++)
+                  for (int sy = 0; sy < scale; sy++)
+                    it.draw_pixel_at(x + xx * scale + sx,
+                                     y + yy * scale + sy);
+          x += 6 * scale;
+        }
+      };
       const auto temperature = [&](int value, int field_x, int field_width) {
-        it.printf(field_x + field_width / 2, 49, id(font_temperature),
-                  TextAlign::TOP_CENTER, "%d°C", value);
+        char digits[5];
+        snprintf(digits, sizeof(digits), "%d", value);
+        const int digit_width = strlen(digits) * 12;
+        const int content_width = digit_width + 12;
+        const int x = field_x + (field_width - content_width) / 2;
+        pixel_text(x, 48, digits, 2);
+        it.circle(x + digit_width + 2, 51, 2);
+        pixel_text(x + digit_width + 6, 50, "C", 1);
       };
 
       if (!id(marax_component).has_data()) {
-        it.print(0, 0, id(font_small), "MaraX ShotTimer");
-        it.print(0, 18, id(font_small), "WiFi");
-        it.print(45, 18, id(font_small),
-                 network::is_connected() ? "OK" : "WAIT");
-        it.print(0, 32, id(font_small), "API");
-        it.print(45, 32, id(font_small),
-                 network::is_connected() ? "OK" : "WAIT");
-        it.print(0, 46, id(font_small), "Data OFF");
+        pixel_text(0, 0, "MaraX ShotTimer", 1);
+        pixel_text(0, 18, "WiFi", 1);
+        pixel_text(45, 18, network::is_connected() ? "OK" : "WAIT", 1);
+        pixel_text(0, 32, "API", 1);
+        pixel_text(45, 32, network::is_connected() ? "OK" : "WAIT", 1);
+        pixel_text(0, 46, "Data OFF", 1);
         return;
       }
 
       const int seconds = id(marax_component).shot_seconds();
       const uint32_t total_minutes = millis() / 60000UL;
-      it.printf(0, 0, id(font_small), "%u:%02u",
-                static_cast<unsigned int>(total_minutes / 60),
-                static_cast<unsigned int>(total_minutes % 60));
+      char uptime[12];
+      snprintf(uptime, sizeof(uptime), "%u:%02u",
+               static_cast<unsigned int>(total_minutes / 60),
+               static_cast<unsigned int>(total_minutes % 60));
+      pixel_text(0, 0, uptime, 1);
       it.line(0, 15, 127, 15);
 
       if (seconds > 2) {
@@ -156,7 +166,12 @@ display:
         static uint8_t frame = 0;
         center_bitmap(0, 60, 16, frames[frame++ % 8], 30, 30);
         temperature(id(marax_component).hx_temperature(), 0, 60);
-        it.printf(127, 19, id(font_shot), TextAlign::TOP_RIGHT, "%02d", seconds);
+        char shot[3] = {
+          static_cast<char>('0' + seconds / 10),
+          static_cast<char>('0' + seconds % 10),
+          '\0'
+        };
+        pixel_text(68, 24, shot, 5);
         return;
       }
 
@@ -167,7 +182,7 @@ display:
       temperature(id(marax_component).steam_temperature(), 69, 59);
 
       if (id(marax_component).heating()) {
-        it.print(50, 0, id(font_small), "Heat up");
+        pixel_text(50, 0, "Heat up", 1);
         if ((millis() / 1000) % 2)
           it.filled_circle(43, 5, 3);
         else
